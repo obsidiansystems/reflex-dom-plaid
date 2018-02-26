@@ -1,0 +1,4 @@
+compiler: ghcjs
+packages:
+  reflex-dom-plaid/
+  demo/
