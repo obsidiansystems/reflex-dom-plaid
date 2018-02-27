@@ -1,6 +1,19 @@
-{-# LANGUAGE DeriveGeneric, FlexibleContexts, LambdaCase, OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 
-module Reflex.Dom.Plaid.Link where
+module Reflex.Dom.Plaid.Link
+  ( PlaidLinkConfig(..)
+  , PlaidLinkEnvironment(..)
+  , PlaidLinkError(..)
+  , PlaidLinkExit(..)
+  , PlaidLinkInstitution(..)
+  , PlaidLinkMeta(..)
+  , PlaidLinkProduct(..)
+  , PlaidLinkSuccess(..)
+  , plaidLinkDialog
+  ) where
 
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
 import Control.Lens.Operators ((^.))
@@ -43,17 +56,6 @@ data PlaidLinkError = PlaidLinkError
   , _plaidLinkError_errorType :: !Text
   } deriving (Eq, Generic, Show)
 
-plaidLinkDialog
-  :: (TriggerEvent t m, PerformEvent t m, MonadJSM (Performable m))
-  => Event t PlaidLinkConfig -> m (Event t (Either PlaidLinkExit PlaidLinkSuccess))
-plaidLinkDialog open = do
-  (onResultEvent, onResultCallback) <- newTriggerEvent
-
-  performEvent_ $ ffor open $ \cfg -> liftJSM $
-    activatePlaidLinkDialog cfg (liftIO . onResultCallback)
-
-  pure onResultEvent
-
 
 data PlaidLinkEnvironment
   = PlaidLinkEnvironment_Sandbox
@@ -73,6 +75,18 @@ data PlaidLinkConfig = PlaidLinkConfig
   , _plaidLinkConfig_publicKey :: !Text
   , _plaidLinkConfig_products :: ![PlaidLinkProduct]
   } deriving (Eq, Generic, Show)
+
+
+plaidLinkDialog
+  :: (TriggerEvent t m, PerformEvent t m, MonadJSM (Performable m))
+  => Event t PlaidLinkConfig -> m (Event t (Either PlaidLinkExit PlaidLinkSuccess))
+plaidLinkDialog open = do
+  (onResultEvent, onResultCallback) <- newTriggerEvent
+
+  performEvent_ $ ffor open $ \cfg -> liftJSM $
+    activatePlaidLinkDialog cfg (liftIO . onResultCallback)
+
+  pure onResultEvent
 
 
 activatePlaidLinkDialog
@@ -102,7 +116,7 @@ activatePlaidLinkDialog cfg onResult = do
 
   o ^. jss (t_ "onLoad") (fun $ \_ _ _ -> do
     handle <- liftIO (readMVar handleMVar)
-    handle ^. js0 (t_ "open")
+    _ <- handle ^. js0 (t_ "open")
     pure ()
     )
 
