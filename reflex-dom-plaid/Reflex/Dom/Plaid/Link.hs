@@ -9,7 +9,6 @@ module Reflex.Dom.Plaid.Link
   , PlaidLinkError(..)
   , PlaidLinkExit(..)
   , PlaidLinkInstitution(..)
-  , PlaidLinkMeta(..)
   , PlaidLinkProduct(..)
   , PlaidLinkSuccess(..)
   , plaidLinkDialog
@@ -33,20 +32,17 @@ data PlaidLinkInstitution = PlaidLinkInstitution
   , _plaidLinkInstitution_id :: !Text
   } deriving (Eq, Generic, Show)
 
-data PlaidLinkMeta = PlaidLinkMeta
-  { _plaidLinkMeta_institution :: !(Maybe PlaidLinkInstitution)
-  , _plaidLinkMeta_sessionId :: !Text
-  , _plaidLinkMeta_status :: !(Maybe Text)
-  } deriving (Eq, Generic, Show)
-
 data PlaidLinkSuccess = PlaidLinkSuccess
   { _plaidLinkSuccess_publicToken :: !Text
-  , _plaidLinkSuccess_meta :: !PlaidLinkMeta
+  , _plaidLinkSuccess_institution :: !PlaidLinkInstitution
+  , _plaidLinkSuccess_sessionId :: !Text
   } deriving (Eq, Generic, Show)
 
 data PlaidLinkExit = PlaidLinkExit
   { _plaidLinkExit_error :: !(Maybe PlaidLinkError)
-  , _plaidLinkExit_meta :: !PlaidLinkMeta
+  , _plaidLinkExit_institution :: !(Maybe PlaidLinkInstitution)
+  , _plaidLinkExit_status :: !(Maybe Text)
+  , _plaidLinkExit_sessionId :: !Text
   } deriving (Eq, Generic, Show)
 
 data PlaidLinkError = PlaidLinkError
@@ -98,18 +94,33 @@ activatePlaidLinkDialog cfg onResult = do
   o <- plaidLinkConfigAsObj
   o ^. jss (t_ "onSuccess") (fun $ \_ _ args -> case args of
     (pubTokenJs : metaJs : _) ->
-      onResult . Right =<< PlaidLinkSuccess
-        <$> fromJSValUnchecked pubTokenJs
-        <*> mkMetaFromObj metaJs
+      metaJs ^. js (t_ "institution") >>= mkInstitutionFromObj >>= \case
+        Nothing -> liftIO $ putStrLn "Plaid institution was empty for successful response"
+        Just institution -> do
+          pubToken <- fromJSValUnchecked pubTokenJs
+          sessionId <- maybeJs valToText =<< metaJs ^. js (t_ "link_session_id")
+          onResult $ Right PlaidLinkSuccess
+            { _plaidLinkSuccess_publicToken = pubToken
+            , _plaidLinkSuccess_institution = institution
+            , _plaidLinkSuccess_sessionId = fromMaybe "" sessionId
+            }
 
     _ -> liftIO $ putStrLn "Plaid onSuccess called with unexpected number of arguments"
     )
 
   o ^. jss (t_ "onExit") (fun $ \_ _ args -> case args of
-    (errJs : metaJs : _) ->
-      onResult . Left =<< PlaidLinkExit
-        <$> maybeJs mkPlaidErrorFromObj errJs
-        <*> mkMetaFromObj metaJs
+    (errJs : metaJs : _) -> do
+      err <- maybeJs mkPlaidErrorFromObj errJs
+      institution <- maybeJs mkInstitutionFromObj =<< metaJs ^. js (t_ "institution")
+      sessionId <- maybeJs valToText =<< o ^. js (t_ "link_session_id")
+      status <- maybeJs valToText =<< o ^. js (t_ "status")
+
+      onResult $ Left PlaidLinkExit
+        { _plaidLinkExit_error = err
+        , _plaidLinkExit_institution = join institution
+        , _plaidLinkExit_sessionId = fromMaybe "" sessionId
+        , _plaidLinkExit_status = status
+        }
 
     _ -> liftIO $ putStrLn "Plaid onExit called with unexpected number of arguments"
     )
@@ -143,16 +154,6 @@ activatePlaidLinkDialog cfg onResult = do
         , _plaidLinkError_errorCode = errorCode
         , _plaidLinkError_errorMessage = errorMessage
         , _plaidLinkError_errorType = errorType
-        }
-
-    mkMetaFromObj o = do
-      institution <- maybeJs mkInstitutionFromObj =<< o ^. js (t_ "institution")
-      sessionId <- maybeJs valToText =<< o ^. js (t_ "link_session_id")
-      status <- maybeJs valToText =<< o ^. js (t_ "status")
-      pure PlaidLinkMeta
-        { _plaidLinkMeta_institution = join institution
-        , _plaidLinkMeta_sessionId = fromMaybe "" sessionId -- This should always be 'Just'
-        , _plaidLinkMeta_status = status
         }
 
     mkInstitutionFromObj o = do
